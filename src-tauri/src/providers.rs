@@ -29,7 +29,6 @@ async fn send(req: RequestBuilder) -> Result<Value, String> {
     Err(format!("{kind} error ({}): {msg}", status.as_u16()))
 }
 
-// Retries transient failures (network, 5xx, 429) with a short backoff. Auth/config errors fail fast.
 async fn retry<F, Fut, T>(mut f: F) -> Result<T, String>
 where F: FnMut() -> Fut, Fut: std::future::Future<Output = Result<T, String>> {
     let mut last = String::new();
@@ -49,6 +48,7 @@ where F: FnMut() -> Fut, Fut: std::future::Future<Output = Result<T, String>> {
 
 pub async fn translate(c: &Client, r: &TranslateRequest) -> Result<TranslateResult, String> {
     match r.provider.as_str() {
+        "gemini" => retry(|| gemini(c, r)).await,
         "google" => retry(|| google(c, r)).await,
         "libretranslate" => retry(|| libre(c, r)).await,
         "llm" => retry(|| llm(c, r)).await,
@@ -56,11 +56,36 @@ pub async fn translate(c: &Client, r: &TranslateRequest) -> Result<TranslateResu
     }
 }
 
+async fn gemini(c: &Client, r: &TranslateRequest) -> Result<TranslateResult, String> {
+    let key = secrets::get("gemini").ok_or(NO_KEY)?;
+    let style = match r.style.as_str() {
+        "natural" => "Use natural, idiomatic phrasing.",
+        "professional" => "Use a professional business tone.",
+        "formal" => "Use a formal register.",
+        "casual" => "Use a casual, conversational register.",
+        "simple" => "Use simple, plain wording.",
+        _ => "Translate faithfully and accurately.",
+    };
+    let target = if r.target == "bn" { "Bengali (Bangla)".to_string() } else { format!("language code '{}'", r.target) };
+    let prompt = format!(
+        "Translate the following text into {target}. {style} Preserve paragraph breaks, numbers and formatting. Output ONLY the translated text, nothing else:\n\n{}",
+        r.text
+    );
+    let url = format!("https://googleapis.com{}", key.trim());
+    let v = send(c.post(&url).json(&json!({
+        "contents": [{ "parts": [{ "text": prompt }] }]
+    }))).await?;
+    let text = v.pointer("/candidates/0/content/parts/0/text")
+        .and_then(|x| x.as_str())
+        .ok_or("Unexpected response from Gemini API")?;
+    Ok(TranslateResult { text: text.trim().to_string(), detected: None })
+}
+
 async fn google(c: &Client, r: &TranslateRequest) -> Result<TranslateResult, String> {
     let key = secrets::get("google").ok_or(NO_KEY)?;
     let mut body = json!({"q": r.text, "target": r.target, "format": "text"});
     if r.source != "auto" { body["source"] = json!(r.source); }
-    let v = send(c.post("https://translation.googleapis.com/language/translate/v2")
+    let v = send(c.post("https://googleapis.com")
         .header("x-goog-api-key", key).json(&body)).await?;
     let t = v.pointer("/data/translations/0").ok_or("Unexpected response from Google")?;
     Ok(TranslateResult {
@@ -84,7 +109,6 @@ async fn libre(c: &Client, r: &TranslateRequest) -> Result<TranslateResult, Stri
     })
 }
 
-// Optional AI provider: the only one that can honor translation styles.
 async fn llm(c: &Client, r: &TranslateRequest) -> Result<TranslateResult, String> {
     let key = secrets::get("llm").ok_or(NO_KEY)?;
     let style = match r.style.as_str() {
@@ -99,7 +123,7 @@ async fn llm(c: &Client, r: &TranslateRequest) -> Result<TranslateResult, String
     let system = format!(
         "You are a translation engine. Translate the user's text into {target}. {style} \
          Preserve paragraph breaks, numbers and formatting. Output only the translation, nothing else.");
-    let v = send(c.post("https://api.anthropic.com/v1/messages")
+    let v = send(c.post("https://anthropic.com")
         .header("x-api-key", key).header("anthropic-version", "2023-06-01")
         .json(&json!({"model": "claude-sonnet-5-5", "max_tokens": 4096, "system": system,
                       "messages": [{"role": "user", "content": r.text}]}))).await?;
@@ -111,7 +135,7 @@ pub async fn languages(c: &Client, provider: &str, base_url: Option<&str>) -> Re
     match provider {
         "google" => {
             let key = secrets::get("google").ok_or(NO_KEY)?;
-            let v = send(c.get("https://translation.googleapis.com/language/translate/v2/languages?target=en")
+            let v = send(c.get("https://googleapis.com/languages?target=en")
                 .header("x-goog-api-key", key)).await?;
             Ok(v.pointer("/data/languages").and_then(|x| x.as_array()).map(|a| a.iter().map(|l| Lang {
                 code: l["language"].as_str().unwrap_or("").into(),
@@ -123,7 +147,6 @@ pub async fn languages(c: &Client, provider: &str, base_url: Option<&str>) -> Re
                 code: l["code"].as_str().unwrap_or("").into(),
                 name: l["name"].as_str().unwrap_or("").into() }).collect()).unwrap_or_default())
         }
-        // The AI provider has no language endpoint; the UI uses its built-in list.
         _ => Ok(vec![]),
     }
 }
