@@ -197,3 +197,10 @@ pub async fn languages(c: &Client, provider: &str, base_url: Option<&str>) -> Re
         "libretranslate" => {
             let v = send(c.get(format!("{}/languages", libre_base(base_url)))).await?;
             Ok(v.as_array().map(|a| a.iter().map(|l| Lang {
+                code: l["code"].as_str().unwrap_or("").into(),
+                name: l["name"].as_str().unwrap_or("").into(),
+            }).collect()).unwrap_or_default())
+        }
+        _ => Ok(vec![]),
+    }
+}
