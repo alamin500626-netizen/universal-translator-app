@@ -1,4 +1,3 @@
-
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -20,23 +19,25 @@ fn encode_uri(s: &str) -> String {
     for b in s.as_bytes() {
         match *b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(*b as char),
-            b' ' => out.push_str("%20"),
             _ => out.push_str(&format!("%{:02X}", b)),
         }
     }
     out
 }
 
+// প্রথমে Google-এর ফ্রি এন্ডপয়েন্ট, ব্যর্থ হলে MyMemory। কোনো API key লাগে না।
 pub async fn translate(c: &Client, r: &TranslateRequest) -> Result<TranslateResult, String> {
     let text = r.text.trim();
-    if text.is_empty() { return Ok(TranslateResult { text: String::new(), detected: None }); }
+    if text.is_empty() {
+        return Ok(TranslateResult { text: String::new(), detected: None });
+    }
 
     let sl = if r.source.trim().is_empty() { "auto" } else { r.source.trim() };
     let tl = if r.target.trim().is_empty() { "bn" } else { r.target.trim() };
 
-    // 1. Primary: Free Google Translate Endpoint (No API key needed)
+    // ১. প্রাইমারি: Google ফ্রি এন্ডপয়েন্ট
     let url = format!(
-        "https://googleapis.com{}&tl={}&dt=t&q={}",
+        "https://translate.googleapis.com/translate_a/single?client=gtx&sl={}&tl={}&dt=t&q={}",
         encode_uri(sl), encode_uri(tl), encode_uri(text)
     );
 
@@ -59,22 +60,24 @@ pub async fn translate(c: &Client, r: &TranslateRequest) -> Result<TranslateResu
         }
     }
 
-    // 2. Backup: Free MyMemory Translation API (No API key needed)
-    let pair_src = if sl == "auto" { "en" } else { sl };
+    // ২. ব্যাকআপ: MyMemory ফ্রি API
+    let pair_src = if sl == "auto" { "Autodetect" } else { sl };
     let mm_url = format!(
-        "https://translated.net{}&langpair={}|{}",
+        "https://api.mymemory.translated.net/get?q={}&langpair={}|{}",
         encode_uri(text), encode_uri(pair_src), encode_uri(tl)
     );
     let resp = c.get(&mm_url).timeout(Duration::from_secs(20)).send().await
-        .map_err(|e| format!("Network error: {}. Check internet connection.", e))?;
+        .map_err(|e| format!("Network error: {}. Check internet connection.", e.without_url()))?;
     let v: Value = resp.json().await.map_err(|e| format!("Parse error: {}", e))?;
+
     let translated = v.pointer("/responseData/translatedText")
         .and_then(|x| x.as_str())
         .unwrap_or("")
         .to_string();
 
-    if translated.is_empty() {
-        return Err("Could not translate text. Please try again.".to_string());
+    if translated.is_empty() || translated.contains("MYMEMORY WARNING") {
+        let why = v.get("responseDetails").and_then(|x| x.as_str()).unwrap_or("Please try again.");
+        return Err(format!("Could not translate text. {}", why));
     }
     Ok(TranslateResult { text: translated, detected: None })
 }
