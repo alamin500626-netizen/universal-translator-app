@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Lang } from "./languages";
 
-export type Provider = "google" | "libretranslate" | "llm";
+export type Provider = "gemini" | "google" | "libretranslate" | "llm";
 export type Mode = "mini" | "compact" | "expanded";
 
 export type Settings = {
@@ -16,12 +16,12 @@ export type Settings = {
 };
 
 export const defaultSettings: Settings = {
-  provider: "google", baseUrl: "https://libretranslate.com",
+  provider: "gemini", baseUrl: "https://libretranslate.com",
   defaultSource: "auto", defaultTarget: "bn",
   autoTranslate: true, autoCopy: false, rememberLast: true,
   lastSource: "auto", lastTarget: "bn",
   saveHistory: true, alwaysOnTop: true, shortcutsEnabled: true,
-  theme: "dark", style: "standard", mode: "compact",
+  theme: "dark", style: "natural", mode: "compact",
   favorites: [], recents: [],
   keys: {
     open: "Ctrl+Shift+T", bengali: "Ctrl+Shift+B", english: "Ctrl+Shift+E",
@@ -29,7 +29,7 @@ export const defaultSettings: Settings = {
   },
 };
 
-const KEY = "ut.settings.v1";
+const KEY = "ut.settings.v2";
 export function loadSettings(): Settings {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? "{}");
