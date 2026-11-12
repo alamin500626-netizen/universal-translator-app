@@ -1,3 +1,4 @@
+
 import { invoke } from "@tauri-apps/api/core";
 import type { Lang } from "./languages";
 
@@ -16,7 +17,7 @@ export type Settings = {
 };
 
 export const defaultSettings: Settings = {
-  provider: "gemini", baseUrl: "https://libretranslate.com",
+  provider: "google", baseUrl: "",
   defaultSource: "auto", defaultTarget: "bn",
   autoTranslate: true, autoCopy: false, rememberLast: true,
   lastSource: "auto", lastTarget: "bn",
@@ -29,7 +30,7 @@ export const defaultSettings: Settings = {
   },
 };
 
-const KEY = "ut.settings.v2";
+const KEY = "ut.settings.v3";
 export function loadSettings(): Settings {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? "{}");
@@ -46,11 +47,44 @@ export type Entry = {
   createdAt: string; favorite: boolean;
 };
 
+// Direct Free Translation Engine (No API Key, No Rust Builder Error!)
+async function directFreeTranslate(text: string, source: string, target: string): Promise<TranslateResult> {
+  const sl = source === "auto" || !source ? "auto" : source;
+  const tl = target || "bn";
+
+  // 1. Primary: Free Google Translate API
+  try {
+    const url = `https://googleapis.com{encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(text)}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      let translated = "";
+      if (Array.isArray(data?.[0])) {
+        for (const item of data[0]) {
+          if (item?.[0]) translated += item[0];
+        }
+      }
+      if (translated.trim()) {
+        return { text: translated.trim(), detected: data?.[2] || null };
+      }
+    }
+  } catch {}
+
+  // 2. Backup: Free MyMemory Translation API
+  const pairSrc = sl === "auto" ? "en" : sl;
+  const mmUrl = `https://translated.net{encodeURIComponent(text)}&langpair=${encodeURIComponent(pairSrc)}|${encodeURIComponent(tl)}`;
+  const mmRes = await fetch(mmUrl);
+  if (!mmRes.ok) throw new Error("Internet connection failed. Please check your Wi-Fi or data.");
+  const mmData = await mmRes.json();
+  const out = mmData?.responseData?.translatedText;
+  if (!out) throw new Error("Could not translate this text.");
+  return { text: out.trim(), detected: null };
+}
+
 export const api = {
   translate: (req: { text: string; source: string; target: string; style: string; provider: Provider; baseUrl: string }) =>
-    invoke<TranslateResult>("translate", { req }),
-  languages: (provider: Provider, baseUrl: string) =>
-    invoke<Lang[]>("languages", { provider, baseUrl }),
+    directFreeTranslate(req.text, req.source, req.target),
+  languages: async (_provider: Provider, _baseUrl: string) => [] as Lang[],
   setKey: (provider: Provider, key: string) => invoke<void>("set_api_key", { provider, key }),
   clearKey: (provider: Provider) => invoke<void>("clear_api_key", { provider }),
   hasKey: (provider: Provider) => invoke<boolean>("has_api_key", { provider }),
