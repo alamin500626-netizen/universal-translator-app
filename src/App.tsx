@@ -84,7 +84,7 @@ export default function App() {
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
         const reader = new FileReader();
         reader.onloadend = async () => {
-          const base64 = (reader.result as string).split(",")[1];
+          const base64 = (reader.result as string).split(",");
           setBusy(true);
           try {
             const res = await api.translate({
@@ -115,7 +115,6 @@ export default function App() {
       setError("Microphone access denied. Check Windows Privacy settings.");
     }
   };
-
   const clip = async () => { try { return (await readText()) ?? ""; } catch { return ""; } };
   const showWindow = async () => { await win.show(); await win.unminimize(); await win.setFocus(); };
 
@@ -210,3 +209,33 @@ export default function App() {
               <textarea readOnly placeholder="Translation appears here" value={output} />
               {error && <div className="err">{error}</div>}
               <div className="tools">
+                <button onClick={async () => { await writeText(output); setStatus("Copied"); }} disabled={!output}>Copy</button>
+                {!mini && <button disabled={!output} onClick={() => { const u = new SpeechSynthesisUtterance(output); u.lang = tgt; speechSynthesis.speak(u); }}>Listen</button>}
+                {!mini && <button disabled={!input.trim()} onClick={() => run(input, src, tgt)}>Re-translate</button>}
+                {!mini && <button onClick={() => setOutput("")}>Clear</button>}
+              </div>
+            </section>
+          </div>
+          {s.mode === "expanded" && <aside><HistoryPanel onUse={useEntry} refreshKey={histKey} /></aside>}
+        </main>
+
+        {panel === "settings" && <div className="overlay"><SettingsPanel s={s} update={update} onClose={() => setPanel("none")} /></div>}
+        {panel === "history" && s.mode !== "expanded" && (
+          <div className="overlay">
+            <div className="shead"><strong>History</strong><button onClick={() => setPanel("none")}>Done</button></div>
+            <HistoryPanel onUse={(e) => { useEntry(e); setPanel("none"); }} refreshKey={histKey} />
+          </div>
+        )}
+
+        <footer>
+          <span className={status === "Error" ? "st bad" : "st"}>{status}</span>
+          <span className="muted"> · {s.provider}</span>
+          <span className="spacer" />
+          <button onClick={() => setPanel(panel === "history" ? "none" : "history")}>History</button>
+          <button onClick={() => update({ mode: s.mode === "mini" ? "compact" : "mini" })}>{s.mode === "mini" ? "Compact" : "Mini"}</button>
+          {!mini && <button onClick={() => update({ mode: s.mode === "expanded" ? "compact" : "expanded" })}>{s.mode === "expanded" ? "Collapse" : "Expand"}</button>}
+        </footer>
+      </div>
+    </div>
+  );
+}
