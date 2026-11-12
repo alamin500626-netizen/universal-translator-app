@@ -15,11 +15,11 @@ pub struct TranslateResult { pub text: String, pub detected: Option<String> }
 #[derive(Serialize)]
 pub struct Lang { pub code: String, pub name: String }
 
-const NO_KEY: &str = "No API key found. Click the Settings (gear) icon and save your Gemini API key.";
+const NO_KEY: &str = "No API key found. Click Settings (gear icon) and save your Gemini API key.";
 
 async fn send(req: RequestBuilder) -> Result<Value, String> {
     let resp = req.timeout(Duration::from_secs(25)).send().await
-        .map_err(|e| format!("Connection failed: {}. Please check internet or firewall.", e))?;
+        .map_err(|e| format!("Connection failed: {}. Check internet or firewall.", e))?;
     let status = resp.status();
     let body: Value = resp.json().await.unwrap_or(Value::Null);
     if status.is_success() { return Ok(body); }
@@ -41,12 +41,11 @@ pub async fn translate(c: &Client, r: &TranslateRequest) -> Result<TranslateResu
 async fn gemini(c: &Client, r: &TranslateRequest) -> Result<TranslateResult, String> {
     let key = secrets::get("gemini").ok_or(NO_KEY)?;
     let clean_key = key.trim();
-    
-    // If audio base64 is sent (for Voice-to-Text)
+    let base = "https://googleapis.com";
+
     if let Some(audio_b64) = r.text.strip_prefix("AUDIO_B64:") {
         let lang_hint = if r.source == "bn" || r.source == "auto" { "Bengali (Bangla)" } else { &r.source };
-        let url = format!("https://googleapis.com{}", clean_key);
-        let v = send(c.post(&url).json(&json!({
+        let v = send(c.post(base).header("x-goog-api-key", clean_key).json(&json!({
             "contents": [{
                 "parts": [
                     { "text": format!("Listen to this audio and transcribe exactly what is spoken in {}. Output ONLY the transcribed text, nothing else.", lang_hint) },
@@ -73,8 +72,7 @@ async fn gemini(c: &Client, r: &TranslateRequest) -> Result<TranslateResult, Str
         "Translate the following text into {target}. {style} Preserve paragraph breaks, numbers and formatting. Output ONLY the translated text, nothing else:\n\n{}",
         r.text
     );
-    let url = format!("https://googleapis.com{}", clean_key);
-    let v = send(c.post(&url).json(&json!({
+    let v = send(c.post(base).header("x-goog-api-key", clean_key).json(&json!({
         "contents": [{ "parts": [{ "text": prompt }] }]
     }))).await?;
     let text = v.pointer("/candidates/0/content/parts/0/text")
