@@ -1,4 +1,3 @@
-
 import { invoke } from "@tauri-apps/api/core";
 import type { Lang } from "./languages";
 
@@ -47,32 +46,36 @@ export type Entry = {
   createdAt: string; favorite: boolean;
 };
 
-// Direct Free Translation Engine (No API Key, No Rust Builder Error!)
 async function directFreeTranslate(text: string, source: string, target: string): Promise<TranslateResult> {
   const sl = source === "auto" || !source ? "auto" : source;
   const tl = target || "bn";
+  const q = encodeURIComponent(text);
 
   // 1. Primary: Free Google Translate API
   try {
-    const url = `https://googleapis.com{encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(text)}`;
-    const res = await fetch(url);
+    const gUrl = "https://googleapis.com" + encodeURIComponent(sl) + "&tl=" + encodeURIComponent(tl) + "&dt=t&q=" + q;
+    const res = await fetch(gUrl);
     if (res.ok) {
       const data = await res.json();
       let translated = "";
-      if (Array.isArray(data?.[0])) {
-        for (const item of data[0]) {
-          if (item?.[0]) translated += item[0];
+      const chunks = Array.isArray(data) ? data.at(0) : null;
+      if (Array.isArray(chunks)) {
+        for (const item of chunks) {
+          if (Array.isArray(item) && typeof item.at(0) === "string") {
+            translated += item.at(0);
+          }
         }
       }
       if (translated.trim()) {
-        return { text: translated.trim(), detected: data?.[2] || null };
+        const det = typeof data?.at?.(2) === "string" ? data.at(2) : null;
+        return { text: translated.trim(), detected: det };
       }
     }
   } catch {}
 
   // 2. Backup: Free MyMemory Translation API
   const pairSrc = sl === "auto" ? "en" : sl;
-  const mmUrl = `https://translated.net{encodeURIComponent(text)}&langpair=${encodeURIComponent(pairSrc)}|${encodeURIComponent(tl)}`;
+  const mmUrl = "https://translated.net" + q + "&langpair=" + encodeURIComponent(pairSrc) + "|" + encodeURIComponent(tl);
   const mmRes = await fetch(mmUrl);
   if (!mmRes.ok) throw new Error("Internet connection failed. Please check your Wi-Fi or data.");
   const mmData = await mmRes.json();
