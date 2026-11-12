@@ -5,7 +5,7 @@ import { api, Provider, Settings } from "./api";
 type Props = { s: Settings; update: (p: Partial<Settings>) => void; onClose: () => void };
 
 const NAMES: Record<Provider, string> = {
-  gemini: "Google Gemini (Free AI - Recommended)",
+  gemini: "Universal AI (Gemini / ChatGPT / Groq / OpenRouter)",
   google: "Google Cloud Translation",
   libretranslate: "LibreTranslate",
   llm: "Claude (Anthropic API)",
@@ -31,7 +31,7 @@ export default function SettingsPanel({ s, update, onClose }: Props) {
     <div className="settings">
       <div className="shead"><strong>Settings</strong><button className="neon-btn" onClick={onClose}>Done</button></div>
 
-      <h4>Translation provider</h4>
+      <h4>AI & Translation Provider</h4>
       <select value={s.provider} onChange={(e) => update({ provider: e.target.value as Provider })}>
         {(Object.keys(NAMES) as Provider[]).map((p) => <option key={p} value={p}>{NAMES[p]}</option>)}
       </select>
@@ -43,7 +43,7 @@ export default function SettingsPanel({ s, update, onClose }: Props) {
           rel="noopener noreferrer"
           className="get-key-btn"
         >
-          🔑 Get Free Gemini API Key (Google AI Studio) ↗
+          🔑 Get Free Gemini API Key (Works with ALL models) ↗
         </a>
       )}
 
@@ -51,19 +51,19 @@ export default function SettingsPanel({ s, update, onClose }: Props) {
         <input value={s.baseUrl} placeholder="https://your-libretranslate-server" onChange={(e) => update({ baseUrl: e.target.value })} />
       )}
       <div className="hrow">
-        <input type="password" value={key} placeholder={hasKey ? "Key saved. Enter a new one to replace it" : "Paste your API key here"} onChange={(e) => setKey(e.target.value)} />
+        <input type="password" value={key} placeholder={hasKey ? "Key saved! Paste new key to replace" : "Paste Gemini / ChatGPT / Groq / OpenRouter key"} onChange={(e) => setKey(e.target.value)} />
         <button className="neon-btn" onClick={async () => {
           if (!key.trim()) return;
-          try { await api.setKey(s.provider, key.trim()); setKey(""); setHasKey(true); setNote("Key saved safely!"); }
+          try { await api.setKey(s.provider, key.trim()); setKey(""); setHasKey(true); setNote("API Key saved safely!"); }
           catch (e) { setNote(String(e)); }
         }}>Save key</button>
         {hasKey && <button onClick={async () => { await api.clearKey(s.provider); setHasKey(false); setNote("Key removed."); }}>Remove</button>}
       </div>
       <button onClick={async () => {
-        setNote("Testing…");
+        setNote("Auto-detecting model & testing…");
         try {
-          if (s.provider === "gemini") {
-            const res = await api.translate({ text: "Hello", source: "en", target: "bn", style: "natural", provider: "gemini", baseUrl: "" });
+          if (s.provider === "gemini" || s.provider === "llm") {
+            const res = await api.translate({ text: "Hello", source: "en", target: "bn", style: "natural", provider: s.provider, baseUrl: "" });
             setNote(`Connected! Test translation: ${res.text}`);
           } else {
             const l = await api.languages(s.provider, s.baseUrl);
@@ -71,7 +71,7 @@ export default function SettingsPanel({ s, update, onClose }: Props) {
           }
         } catch (e) { setNote(String(e)); }
       }}>Test connection</button>
-      {note && <p className="muted" style={{ color: note.startsWith("Connected") ? "#00C9A7" : "#ff6b6b" }}>{note}</p>}
+      {note && <p className="muted" style={{ color: note.startsWith("Connected") ? "#00f5a0" : "#ff6b6b" }}>{note}</p>}
 
       <h4>Behavior</h4>
       <Toggle k="autoTranslate" label="Translate copied text automatically" />
@@ -93,7 +93,7 @@ export default function SettingsPanel({ s, update, onClose }: Props) {
       <label>Default source language code (auto = detect)
         <input value={s.defaultSource} onChange={(e) => update({ defaultSource: e.target.value })} />
       </label>
-      <label>Translation style (Works best with Gemini)
+      <label>Translation style
         <select value={s.style} onChange={(e) => update({ style: e.target.value })}>
           <option value="standard">Standard</option>
           <option value="natural">Natural</option>
