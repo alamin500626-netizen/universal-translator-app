@@ -1,8 +1,8 @@
 [package]
 name = "universal-translator"
 version = "1.0.0"
-description = "Universal Translator "
-edition = "2026"
+description = "Universal Translator"
+edition = "2021"
 
 [lib]
 name = "universal_translator_lib"
