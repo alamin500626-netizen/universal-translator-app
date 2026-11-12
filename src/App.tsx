@@ -8,7 +8,7 @@ import LangSelect from "./LangSelect";
 import SettingsPanel from "./SettingsPanel";
 import HistoryPanel from "./HistoryPanel";
 
-const SIZES: Record<Mode, [number, number]> = { mini: [380, 300], compact: [480, 580], expanded: [940, 660] };
+const SIZES: Record<Mode, [number, number]> = { mini:, compact:, expanded: [940, 660] };
 
 export default function App() {
   const win = getCurrentWindow();
@@ -22,13 +22,13 @@ export default function App() {
   const [status, setStatus] = useState("Ready");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [listening, setListening] = useState(false);
   const [panel, setPanel] = useState<"none" | "settings" | "history">("none");
   const [pick, setPick] = useState(0);
   const [histKey, setHistKey] = useState(0);
 
   const update = (p: Partial<Settings>) => setS((old) => { const n = { ...old, ...p }; saveSettings(n); return n; });
 
-  // Language list comes from the provider; fallback list is used if it is unavailable.
   useEffect(() => {
     api.languages(s.provider, s.baseUrl).then((l) => l.length && setLangs(l)).catch(() => setLangs(FALLBACK));
   }, [s.provider, s.baseUrl]);
@@ -54,10 +54,40 @@ export default function App() {
     } finally { setBusy(false); }
   }, [s]);
 
+  // Voice-to-Text (Speech Recognition)
+  const recRef = useRef<any>(null);
+  const toggleVoice = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setError("Voice input is not supported in this WebView.");
+      return;
+    }
+    if (listening && recRef.current) {
+      recRef.current.stop();
+      setListening(false);
+      setStatus("Ready");
+      return;
+    }
+    const rec = new SpeechRecognition();
+    rec.lang = src === "bn" ? "bn-BD" : src === "auto" ? "bn-BD" : src;
+    rec.interimResults = true;
+    rec.continuous = false;
+
+    rec.onstart = () => { setListening(true); setError(""); setStatus("Listening… Speak now"); };
+    rec.onresult = (e: any) => {
+      const transcript = Array.from(e.results).map((res: any) => res[0].transcript).join("");
+      setInput(transcript);
+    };
+    rec.onerror = (e: any) => { setError(`Voice error: ${e.error}`); setListening(false); setStatus("Ready"); };
+    rec.onend = () => { setListening(false); setStatus("Voice captured"); };
+
+    recRef.current = rec;
+    rec.start();
+  };
+
   const clip = async () => { try { return (await readText()) ?? ""; } catch { return ""; } };
   const showWindow = async () => { await win.show(); await win.unminimize(); await win.setFocus(); };
 
-  // Shortcut handlers always see the latest state through this ref.
   const actions = useRef({} as Record<string, () => void>);
   actions.current = {
     open: async () => {
@@ -95,68 +125,65 @@ export default function App() {
   const mini = s.mode === "mini";
 
   return (
-    <div className={`app ${s.mode}`}>
-      <header data-tauri-drag-region>
-        <span className="logo" data-tauri-drag-region>文A</span>
-        {!mini && <span className="title" data-tauri-drag-region>Universal Translator</span>}
-        <span className="spacer" data-tauri-drag-region />
-        <button title={s.alwaysOnTop ? "Always on top: on" : "Always on top: off"} className={s.alwaysOnTop ? "pin on" : "pin"} onClick={() => update({ alwaysOnTop: !s.alwaysOnTop })}>📌</button>
-        {!mini && <button title="Settings" onClick={() => setPanel(panel === "settings" ? "none" : "settings")}>⚙</button>}
-        <button title="Minimize" onClick={() => win.minimize()}>–</button>
-        <button title="Hide to tray" onClick={() => win.hide()}>✕</button>
-      </header>
+    <div className="neon-shell">
+      <div className={`app ${s.mode}`}>
+        <header data-tauri-drag-region>
+          <span className="logo" data-tauri-drag-region>文A</span>
+          {!mini && <span className="title" data-tauri-drag-region>Universal Translator</span>}
+          <span className="spacer" data-tauri-drag-region />
+          <button title={s.alwaysOnTop ? "Always on top: on" : "Always on top: off"} className={s.alwaysOnTop ? "pin on" : "pin"} onClick={() => update({ alwaysOnTop: !s.alwaysOnTop })}>📌</button>
+          {!mini && <button title="Settings" onClick={() => setPanel(panel === "settings" ? "none" : "settings")}>⚙</button>}
+          <button title="Minimize" onClick={() => win.minimize()}>–</button>
+          <button title="Hide to tray" onClick={() => win.hide()}>✕</button>
+        </header>
 
-      <div className="langbar">
-        <LangSelect {...sel} label="Source language" value={src} onChange={setSrc} allowAuto />
-        <button className="swap" title="Swap languages" onClick={swap}>⇄</button>
-        <LangSelect {...sel} label="Target language" value={tgt} onChange={setTgt} openSignal={pick} />
-      </div>
-
-      <main>
-        <div className="body">
-          <section className="box">
-            <textarea placeholder="Type or paste text. Or copy anywhere and press the shortcut." value={input} onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.ctrlKey && e.key === "Enter") run(input, src, tgt); }} />
-            <div className="tools">
-              <button onClick={async () => { const t = await clip(); if (t) setInput(t); }}>Paste</button>
-              <button onClick={() => { setInput(""); setOutput(""); setError(""); }}>Clear</button>
-              {!mini && <span className="count">{input.length} characters</span>}
-            </div>
-          </section>
-
-          <button className="go" disabled={busy || !input.trim()} onClick={() => run(input, src, tgt)}>
-            {busy ? "Translating…" : "Translate"} {!mini && <small>Ctrl+Enter</small>}
-          </button>
-
-          <section className="box out">
-            {busy && <div className="bar" />}
-            <textarea readOnly placeholder="Translation appears here" value={output} />
-            {error && <div className="err">{error}</div>}
-            <div className="tools">
-              <button onClick={async () => { await writeText(output); setStatus("Copied"); }} disabled={!output}>Copy</button>
-              {!mini && <button disabled={!output} onClick={() => { const u = new SpeechSynthesisUtterance(output); u.lang = tgt; speechSynthesis.speak(u); }}>Listen</button>}
-              {!mini && <button disabled={!input.trim()} onClick={() => run(input, src, tgt)}>Re-translate</button>}
-              {!mini && <button onClick={() => setOutput("")}>Clear</button>}
-            </div>
-          </section>
+        <div className="langbar">
+          <LangSelect {...sel} label="Source language" value={src} onChange={setSrc} allowAuto />
+          <button className="swap" title="Swap languages" onClick={swap}>⇄</button>
+          <LangSelect {...sel} label="Target language" value={tgt} onChange={setTgt} openSignal={pick} />
         </div>
-        {s.mode === "expanded" && <aside><HistoryPanel onUse={useEntry} refreshKey={histKey} /></aside>}
-      </main>
 
-      {panel === "settings" && <div className="overlay"><SettingsPanel s={s} update={update} onClose={() => setPanel("none")} /></div>}
-      {panel === "history" && s.mode !== "expanded" && (
-        <div className="overlay"><div className="shead"><strong>History</strong><button onClick={() => setPanel("none")}>Done</button></div>
-          <HistoryPanel onUse={(e) => { useEntry(e); setPanel("none"); }} refreshKey={histKey} /></div>
-      )}
+        <main>
+          <div className="body">
+            <section className="box">
+              <textarea placeholder="Type, paste, or click 🎤 Voice to speak..." value={input} onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.ctrlKey && e.key === "Enter") run(input, src, tgt); }} />
+              <div className="tools">
+                <button className={listening ? "mic-btn listening" : "mic-btn"} onClick={toggleVoice}>
+                  {listening ? "⏹ Stop" : "🎤 Voice"}
+                </button>
+                <button onClick={async () => { const t = await clip(); if (t) setInput(t); }}>Paste</button>
+                <button onClick={() => { setInput(""); setOutput(""); setError(""); }}>Clear</button>
+                {!mini && <span className="count">{input.length} chars</span>}
+              </div>
+            </section>
 
-      <footer>
-        <span className={error ? "st bad" : "st"}>{status}</span>
-        <span className="muted">{s.provider}</span>
-        <span className="spacer" />
-        {!mini && s.mode !== "expanded" && <button onClick={() => setPanel("history")}>History</button>}
-        <button onClick={() => update({ mode: mini ? "compact" : "mini" })}>{mini ? "Compact" : "Mini"}</button>
-        {!mini && <button onClick={() => update({ mode: s.mode === "expanded" ? "compact" : "expanded" })}>{s.mode === "expanded" ? "Collapse" : "Expand"}</button>}
-      </footer>
-    </div>
-  );
-}
+            <button className="go" disabled={busy || !input.trim()} onClick={() => run(input, src, tgt)}>
+              {busy ? "Translating…" : "Translate"} {!mini && <small>Ctrl+Enter</small>}
+            </button>
+
+            <section className="box out">
+              {busy && <div className="bar" />}
+              <textarea readOnly placeholder="Translation appears here" value={output} />
+              {error && <div className="err">{error}</div>}
+              <div className="tools">
+                <button onClick={async () => { await writeText(output); setStatus("Copied"); }} disabled={!output}>Copy</button>
+                {!mini && <button disabled={!output} onClick={() => { const u = new SpeechSynthesisUtterance(output); u.lang = tgt; speechSynthesis.speak(u); }}>Listen</button>}
+                {!mini && <button disabled={!input.trim()} onClick={() => run(input, src, tgt)}>Re-translate</button>}
+                {!mini && <button onClick={() => setOutput("")}>Clear</button>}
+              </div>
+            </section>
+          </div>
+          {s.mode === "expanded" && <aside><HistoryPanel onUse={useEntry} refreshKey={histKey} /></aside>}
+        </main>
+
+        {panel === "settings" && <div className="overlay"><SettingsPanel s={s} update={update} onClose={() => setPanel("none")} /></div>}
+        {panel === "history" && s.mode !== "expanded" && (
+          <div className="overlay">
+            <div className="shead"><strong>History</strong><button onClick={() => setPanel("none")}>Done</button></div>
+            <HistoryPanel onUse={(e) => { useEntry(e); setPanel("none"); }} refreshKey={histKey} />
+          </div>
+        )}
+
+        <footer>
+          <span className={status === "Error" ? "st bad" : "st"}>{status}</span>
