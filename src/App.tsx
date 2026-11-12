@@ -58,7 +58,6 @@ export default function App() {
     } finally { setBusy(false); }
   }, [s]);
 
-  // Voice-to-Text (Speech Recognition)
   const recRef = useRef<any>(null);
   const toggleVoice = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -79,7 +78,7 @@ export default function App() {
 
     rec.onstart = () => { setListening(true); setError(""); setStatus("Listening… Speak now"); };
     rec.onresult = (e: any) => {
-      const transcript = Array.from(e.results).map((res: any) => res[0].transcript).join("");
+      const transcript = Array.from(e.results).map((res: any) => res.transcript).join("");
       setInput(transcript);
     };
     rec.onerror = (e: any) => { setError(`Voice error: ${e.error}`); setListening(false); setStatus("Ready"); };
@@ -190,4 +189,3 @@ export default function App() {
         )}
 
         <footer>
-          <span className={status === "Error" ? "st bad" : "st"}>{status}</span>
