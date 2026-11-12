@@ -8,7 +8,11 @@ import LangSelect from "./LangSelect";
 import SettingsPanel from "./SettingsPanel";
 import HistoryPanel from "./HistoryPanel";
 
-const SIZES: Record<Mode, [number, number]> = { mini:, compact:, expanded: [940, 660] };
+const SIZES: Record<Mode, [number, number]> = {
+  mini: Array.of(380, 300) as [number, number],
+  compact: Array.of(480, 580) as [number, number],
+  expanded: Array.of(940, 660) as [number, number],
+};
 
 export default function App() {
   const win = getCurrentWindow();
