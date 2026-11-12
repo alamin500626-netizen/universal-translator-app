@@ -38,7 +38,6 @@ pub async fn translate(c: &Client, r: &TranslateRequest) -> Result<TranslateResu
     }
 }
 
-// Universal Smart AI: Auto-detects Gemini, ChatGPT (OpenAI), Groq, OpenRouter, or Claude keys & finds working models automatically!
 async fn smart_ai(c: &Client, r: &TranslateRequest) -> Result<TranslateResult, String> {
     let raw_key = secrets::get("gemini")
         .or_else(|| secrets::get("llm"))
@@ -47,36 +46,30 @@ async fn smart_ai(c: &Client, r: &TranslateRequest) -> Result<TranslateResult, S
     let key = raw_key.trim();
     if key.is_empty() { return Err(NO_KEY.to_string()); }
 
-    // 1. OpenRouter Key (sk-or-...)
     if key.starts_with("sk-or-") {
         return openai_compatible(c, r, key, "https://openrouter.ai", "google/gemini-2.0-flash-exp:free").await;
     }
-    // 2. Groq Free Key (gsk_...)
     if key.starts_with("gsk_") {
         return openai_compatible(c, r, key, "https://groq.com", "llama-3.3-70b-versatile").await;
     }
-    // 3. Anthropic Claude Key (sk-ant-...)
     if key.starts_with("sk-ant-") {
         return claude_api(c, r, key).await;
     }
-    // 4. OpenAI / ChatGPT Key (sk-...)
     if key.starts_with("sk-") {
         return openai_compatible(c, r, key, "https://openai.com", "gpt-4o-mini").await;
     }
 
-    // 5. Default: Google Gemini API Key (AIza...) - Auto-discovers available models so 404 NEVER happens!
     gemini_auto(c, r, key).await
 }
 
 async fn gemini_auto(c: &Client, r: &TranslateRequest, key: &str) -> Result<TranslateResult, String> {
-    // Dynamically fetch available models for this exact API key
     let mut models_to_try: Vec<String> = Vec::new();
     if let Ok(list) = send(c.get("https://googleapis.com").header("x-goog-api-key", key)).await {
         if let Some(arr) = list.get("models").and_then(|m| m.as_array()) {
             for m in arr {
                 let name = m["name"].as_str().unwrap_or("").trim_start_matches("models/");
                 let methods = m["supportedGenerationMethods"].as_array();
-                let supports_gen = methods.map(|arr| arr.iter().any(|x| x.as_str() == Some("generateContent"))).unwrap_or(false);
+                let supports_gen = methods.map(|a| a.iter().any(|x| x.as_str() == Some("generateContent"))).unwrap_or(false);
                 if supports_gen && name.contains("flash") && !name.contains("8b") && !name.contains("lite") {
                     models_to_try.push(name.to_string());
                 }
@@ -84,14 +77,13 @@ async fn gemini_auto(c: &Client, r: &TranslateRequest, key: &str) -> Result<Tran
             for m in arr {
                 let name = m["name"].as_str().unwrap_or("").trim_start_matches("models/");
                 let supports_gen = m["supportedGenerationMethods"].as_array()
-                    .map(|arr| arr.iter().any(|x| x.as_str() == Some("generateContent"))).unwrap_or(false);
+                    .map(|a| a.iter().any(|x| x.as_str() == Some("generateContent"))).unwrap_or(false);
                 if supports_gen && name.contains("gemini") && !models_to_try.contains(&name.to_string()) {
                     models_to_try.push(name.to_string());
                 }
             }
         }
     }
-    // Fallback list if model listing was blocked
     for fallback in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"] {
         if !models_to_try.contains(&fallback.to_string()) {
             models_to_try.push(fallback.to_string());
@@ -195,3 +187,13 @@ async fn libre(c: &Client, r: &TranslateRequest) -> Result<TranslateResult, Stri
     let v = send(c.post(format!("{}/translate", libre_base(r.base_url.as_deref())))
         .json(&body)).await?;
     Ok(TranslateResult {
+        text: v["translatedText"].as_str().ok_or("Unexpected response from LibreTranslate")?.to_string(),
+        detected: v.pointer("/detectedLanguage/language").and_then(|x| x.as_str()).map(String::from),
+    })
+}
+
+pub async fn languages(c: &Client, provider: &str, base_url: Option<&str>) -> Result<Vec<Lang>, String> {
+    match provider {
+        "libretranslate" => {
+            let v = send(c.get(format!("{}/languages", libre_base(base_url)))).await?;
+            Ok(v.as_array().map(|a| a.iter().map(|l| Lang {
