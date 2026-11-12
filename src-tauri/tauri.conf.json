@@ -12,9 +12,20 @@
   "app": {
     "windows": [
       {
-        "label": "main", "title": "Universal Translator",
-        "width": 480, "height": 580, "minWidth": 340, "minHeight": 260,
-        "decorations": false, "alwaysOnTop": true, "resizable": true
+        "label": "main",
+        "title": "Universal Translator",
+        "width": 480,
+        "height": 580,
+        "minWidth": 340,
+        "minHeight": 260,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": true,
+        "transparent": true,
+        "shadow": true,
+        "windowEffects": {
+          "effects": ["acrylic", "mica"]
+        }
       }
     ],
     "security": { "csp": null }
