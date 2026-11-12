@@ -46,53 +46,108 @@ export type Entry = {
   createdAt: string; favorite: boolean;
 };
 
-async function directFreeTranslate(text: string, source: string, target: string): Promise<TranslateResult> {
-  const sl = source === "auto" || !source ? "auto" : source;
-  const tl = target || "bn";
-  const q = encodeURIComponent(text);
+// ---------------------------------------------------------------------------
+// Translation (free, no API key)
+//  1) Rust backend (src-tauri/src/providers.rs): Google free endpoint, MyMemory backup.
+//     It runs outside the webview, so there are no browser/CORS limits.
+//  2) If the backend call fails, a browser fetch fallback with correctly built URLs.
+// ---------------------------------------------------------------------------
 
-  // 1. Primary: Free Google Translate API
-  try {
-    const gUrl = "https://googleapis.com" + encodeURIComponent(sl) + "&tl=" + encodeURIComponent(tl) + "&dt=t&q=" + q;
-    const res = await fetch(gUrl);
-    if (res.ok) {
-      const data = await res.json();
-      let translated = "";
-      let detected: string | null = null;
-      if (Array.isArray(data)) {
-        data.forEach((part, idx) => {
-          if (idx === 0 && Array.isArray(part)) {
-            part.forEach((seg) => {
-              if (Array.isArray(seg)) {
-                seg.forEach((val, sIdx) => {
-                  if (sIdx === 0 && typeof val === "string") translated += val;
-                });
-              }
-            });
-          }
-          if (idx === 2 && typeof part === "string") detected = part;
-        });
-      }
-      if (translated.trim()) {
-        return { text: translated.trim(), detected };
+const MAX_CHUNK = 350; // keeps every request URL short and under MyMemory's 500-char limit
+
+// Split text into small pieces along line and sentence boundaries (keeps paragraph breaks).
+function splitText(text: string, max = MAX_CHUNK): string[] {
+  const parts: string[] = [];
+  for (const line of text.split("\n")) {
+    if (line.length <= max) { parts.push(line); continue; }
+    let buf = "";
+    for (const sentence of line.split(/(?<=[\u0964.!?])\s+/)) {
+      if (sentence.length > max) {
+        if (buf) { parts.push(buf); buf = ""; }
+        for (let i = 0; i < sentence.length; i += max) parts.push(sentence.slice(i, i + max));
+      } else if (buf && (buf + " " + sentence).length > max) {
+        parts.push(buf); buf = sentence;
+      } else {
+        buf = buf ? buf + " " + sentence : sentence;
       }
     }
-  } catch {}
+    if (buf) parts.push(buf);
+  }
+  return parts;
+}
 
-  // 2. Backup: Free MyMemory Translation API
-  const pairSrc = sl === "auto" ? "en" : sl;
-  const mmUrl = "https://translated.net" + q + "&langpair=" + encodeURIComponent(pairSrc) + "|" + encodeURIComponent(tl);
-  const mmRes = await fetch(mmUrl);
-  if (!mmRes.ok) throw new Error("Internet connection failed. Please check your Wi-Fi or data.");
-  const mmData = await mmRes.json();
-  const out = mmData?.responseData?.translatedText;
-  if (!out) throw new Error("Could not translate this text.");
-  return { text: out.trim(), detected: null };
+// Browser-side fallback. URLs are built with URLSearchParams, never by string pasting.
+async function browserTranslate(q: string, sl: string, tl: string): Promise<TranslateResult> {
+  // Google free endpoint
+  try {
+    const url = "https://translate.googleapis.com/translate_a/single?" +
+      new URLSearchParams({ client: "gtx", sl, tl, dt: "t", q }).toString();
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      let out = "";
+      if (Array.isArray(data) && Array.isArray(data[0])) {
+        for (const seg of data[0]) if (Array.isArray(seg) && typeof seg[0] === "string") out += seg[0];
+      }
+      if (out.trim()) return { text: out, detected: typeof data[2] === "string" ? data[2] : null };
+    }
+  } catch { /* try the backup */ }
+
+  // MyMemory backup
+  const pair = (sl === "auto" ? "Autodetect" : sl) + "|" + tl;
+  const res = await fetch("https://api.mymemory.translated.net/get?" +
+    new URLSearchParams({ q, langpair: pair }).toString());
+  if (!res.ok) throw new Error("Internet connection failed. Please check your Wi-Fi or data.");
+  const data = await res.json();
+  const out: string | undefined = data?.responseData?.translatedText;
+  if (!out || String(out).includes("MYMEMORY WARNING")) {
+    throw new Error(String(data?.responseDetails || "Could not translate this text."));
+  }
+  return { text: out, detected: null };
+}
+
+async function translateOne(req: TranslateReq): Promise<TranslateResult> {
+  try {
+    return await invoke<TranslateResult>("translate", { req });
+  } catch (backendErr) {
+    try {
+      return await browserTranslate(req.text, req.source, req.target);
+    } catch (fallbackErr) {
+      throw new Error(`${String(fallbackErr instanceof Error ? fallbackErr.message : fallbackErr)} (${String(backendErr)})`);
+    }
+  }
+}
+
+type TranslateReq = {
+  text: string; source: string; target: string; style: string; provider: Provider; baseUrl: string;
+};
+
+async function freeTranslate(req: TranslateReq): Promise<TranslateResult> {
+  // Voice-to-text is not set up (it needs a Gemini key). Show a clear message instead of
+  // sending recorded audio as if it were text.
+  if (req.text.startsWith("AUDIO_B64:")) {
+    throw new Error("Voice input is not available yet: it needs a Gemini API key.");
+  }
+
+  const text = req.text.replace(/\r\n/g, "\n").trim();
+  if (!text) return { text: "", detected: null };
+
+  const source = !req.source ? "auto" : req.source;
+  const target = req.target || "bn";
+
+  const out: string[] = [];
+  let detected: string | null = null;
+  for (const chunk of splitText(text)) {
+    if (!chunk.trim()) { out.push(chunk); continue; } // keep blank lines
+    const r = await translateOne({ ...req, text: chunk, source, target });
+    out.push(r.text);
+    if (!detected && r.detected) detected = r.detected;
+  }
+  return { text: out.join("\n"), detected };
 }
 
 export const api = {
-  translate: (req: { text: string; source: string; target: string; style: string; provider: Provider; baseUrl: string }) =>
-    directFreeTranslate(req.text, req.source, req.target),
+  translate: (req: TranslateReq) => freeTranslate(req),
   languages: async (_provider: Provider, _baseUrl: string) => [] as Lang[],
   setKey: (provider: Provider, key: string) => invoke<void>("set_api_key", { provider, key }),
   clearKey: (provider: Provider) => invoke<void>("clear_api_key", { provider }),
