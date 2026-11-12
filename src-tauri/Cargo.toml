@@ -1,8 +1,8 @@
 [package]
-name = "universal-translator"
+name = "universal-translator AM"
 version = "1.0.0"
-description = "Universal Translator"
-edition = "2021"
+description = "Universal Translator AM "
+edition = "2026"
 
 [lib]
 name = "universal_translator_lib"
@@ -19,7 +19,7 @@ tauri-plugin-autostart = "2"
 tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", features = ["json"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 keyring = { version = "3", features = ["windows-native"] }
 tokio = { version = "1", features = ["time"] }
