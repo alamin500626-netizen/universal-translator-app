@@ -59,7 +59,6 @@ export default function App() {
     } finally { setBusy(false); }
   }, [s]);
 
-  // Gemini AI Audio Recording (100% works in Windows Tauri)
   const mediaRecRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
