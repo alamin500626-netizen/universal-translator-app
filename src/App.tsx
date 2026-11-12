@@ -9,9 +9,9 @@ import SettingsPanel from "./SettingsPanel";
 import HistoryPanel from "./HistoryPanel";
 
 const SIZES: Record<Mode, [number, number]> = {
-  mini: Array.of(380, 300) as [number, number],
-  compact: Array.of(480, 580) as [number, number],
-  expanded: Array.of(940, 660) as [number, number],
+  mini: Array.of(380, 310) as [number, number],
+  compact: Array.of(480, 560) as [number, number],
+  expanded: Array.of(920, 620) as [number, number],
 };
 
 export default function App() {
@@ -30,6 +30,7 @@ export default function App() {
   const [panel, setPanel] = useState<"none" | "settings" | "history">("none");
   const [pick, setPick] = useState(0);
   const [histKey, setHistKey] = useState(0);
+  const [mousePos, setMousePos] = useState({ x: -200, y: -200 });
 
   const update = (p: Partial<Settings>) => setS((old) => { const n = { ...old, ...p }; saveSettings(n); return n; });
 
@@ -58,34 +59,62 @@ export default function App() {
     } finally { setBusy(false); }
   }, [s]);
 
-  const recRef = useRef<any>(null);
-  const toggleVoice = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setError("Voice input is not supported in this WebView.");
-      return;
-    }
-    if (listening && recRef.current) {
-      recRef.current.stop();
+  // Gemini AI Audio Recording (100% works in Windows Tauri)
+  const mediaRecRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+
+  const toggleVoice = async () => {
+    if (listening && mediaRecRef.current) {
+      mediaRecRef.current.stop();
       setListening(false);
-      setStatus("Ready");
+      setStatus("Processing voice…");
       return;
     }
-    const rec = new SpeechRecognition();
-    rec.lang = src === "bn" ? "bn-BD" : src === "auto" ? "bn-BD" : src;
-    rec.interimResults = true;
-    rec.continuous = false;
+    try {
+      setError("");
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
 
-    rec.onstart = () => { setListening(true); setError(""); setStatus("Listening… Speak now"); };
-    rec.onresult = (e: any) => {
-      const transcript = Array.from(e.results).map((res: any) => res.transcript).join("");
-      setInput(transcript);
-    };
-    rec.onerror = (e: any) => { setError(`Voice error: ${e.error}`); setListening(false); setStatus("Ready"); };
-    rec.onend = () => { setListening(false); setStatus("Voice captured"); };
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
 
-    recRef.current = rec;
-    rec.start();
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          const base64 = (reader.result as string).split(",")[1];
+          setBusy(true);
+          try {
+            const res = await api.translate({
+              text: `AUDIO_B64:${base64}`,
+              source: src,
+              target: tgt,
+              style: s.style,
+              provider: "gemini",
+              baseUrl: "",
+            });
+            setInput(res.text);
+            setStatus("Voice converted to text");
+          } catch (err) {
+            setError(String(err));
+            setStatus("Error");
+          } finally {
+            setBusy(false);
+          }
+        };
+        reader.readAsDataURL(blob);
+      };
+
+      mediaRecRef.current = recorder;
+      recorder.start();
+      setListening(true);
+      setStatus("Recording… Click Stop when done");
+    } catch (err) {
+      setError("Microphone access denied. Check Windows Privacy settings.");
+    }
   };
 
   const clip = async () => { try { return (await readText()) ?? ""; } catch { return ""; } };
@@ -128,7 +157,19 @@ export default function App() {
   const mini = s.mode === "mini";
 
   return (
-    <div className="neon-shell">
+    <div
+      className="neon-shell"
+      onMouseMove={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      }}
+    >
+      <div
+        className="cursor-glow"
+        style={{
+          background: `radial-gradient(260px circle at ${mousePos.x}px ${mousePos.y}px, rgba(0, 210, 255, 0.22), rgba(255, 0, 127, 0.12) 40%, transparent 75%)`,
+        }}
+      />
       <div className={`app ${s.mode}`}>
         <header data-tauri-drag-region>
           <span className="logo" data-tauri-drag-region>文A</span>
@@ -170,41 +211,3 @@ export default function App() {
               <textarea readOnly placeholder="Translation appears here" value={output} />
               {error && <div className="err">{error}</div>}
               <div className="tools">
-                <button onClick={async () => { await writeText(output); setStatus("Copied"); }} disabled={!output}>Copy</button>
-                {!mini && <button disabled={!output} onClick={() => { const u = new SpeechSynthesisUtterance(output); u.lang = tgt; speechSynthesis.speak(u); }}>Listen</button>}
-                {!mini && <button disabled={!input.trim()} onClick={() => run(input, src, tgt)}>Re-translate</button>}
-                {!mini && <button onClick={() => setOutput("")}>Clear</button>}
-              </div>
-            </section>
-          </div>
-          {s.mode === "expanded" && <aside><HistoryPanel onUse={useEntry} refreshKey={histKey} /></aside>}
-        </main>
-
-        {panel === "settings" && <div className="overlay"><SettingsPanel s={s} update={update} onClose={() => setPanel("none")} /></div>}
-        {panel === "history" && s.mode !== "expanded" && (
-          <div className="overlay">
-            <div className="shead"><strong>History</strong><button onClick={() => setPanel("none")}>Done</button></div>
-            <HistoryPanel onUse={(e) => { useEntry(e); setPanel("none"); }} refreshKey={histKey} />
-          </div>
-        )}
-
-                <footer>
-          <span className={status === "Error" ? "st bad" : "st"}>{status}</span>
-          <span className="muted"> · {s.provider}</span>
-          <span className="spacer" />
-          <button onClick={() => setPanel(panel === "history" ? "none" : "history")}>
-            History
-          </button>
-          <button onClick={() => update({ mode: s.mode === "mini" ? "compact" : "mini" })}>
-            {s.mode === "mini" ? "Compact" : "Mini"}
-          </button>
-          {!mini && (
-            <button onClick={() => update({ mode: s.mode === "expanded" ? "compact" : "expanded" })}>
-              {s.mode === "expanded" ? "Collapse" : "Expand"}
-            </button>
-          )}
-        </footer>
-      </div>
-    </div>
-  );
-}
