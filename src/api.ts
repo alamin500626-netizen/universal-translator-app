@@ -58,17 +58,23 @@ async function directFreeTranslate(text: string, source: string, target: string)
     if (res.ok) {
       const data = await res.json();
       let translated = "";
-      const chunks = Array.isArray(data) ? data.at(0) : null;
-      if (Array.isArray(chunks)) {
-        for (const item of chunks) {
-          if (Array.isArray(item) && typeof item.at(0) === "string") {
-            translated += item.at(0);
+      let detected: string | null = null;
+      if (Array.isArray(data)) {
+        data.forEach((part, idx) => {
+          if (idx === 0 && Array.isArray(part)) {
+            part.forEach((seg) => {
+              if (Array.isArray(seg)) {
+                seg.forEach((val, sIdx) => {
+                  if (sIdx === 0 && typeof val === "string") translated += val;
+                });
+              }
+            });
           }
-        }
+          if (idx === 2 && typeof part === "string") detected = part;
+        });
       }
       if (translated.trim()) {
-        const det = typeof data?.at?.(2) === "string" ? data.at(2) : null;
-        return { text: translated.trim(), detected: det };
+        return { text: translated.trim(), detected };
       }
     }
   } catch {}
