@@ -188,4 +188,23 @@ export default function App() {
           </div>
         )}
 
-        <footer>
+                <footer>
+          <span className={status === "Error" ? "st bad" : "st"}>{status}</span>
+          <span className="muted"> · {s.provider}</span>
+          <span className="spacer" />
+          <button onClick={() => setPanel(panel === "history" ? "none" : "history")}>
+            History
+          </button>
+          <button onClick={() => update({ mode: s.mode === "mini" ? "compact" : "mini" })}>
+            {s.mode === "mini" ? "Compact" : "Mini"}
+          </button>
+          {!mini && (
+            <button onClick={() => update({ mode: s.mode === "expanded" ? "compact" : "expanded" })}>
+              {s.mode === "expanded" ? "Collapse" : "Expand"}
+            </button>
+          )}
+        </footer>
+      </div>
+    </div>
+  );
+}
